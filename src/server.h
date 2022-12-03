@@ -397,7 +397,8 @@ extern int configOOMScoreAdjValuesDefaults[CONFIG_OOM_COUNT];
 #define BLOCKED_ZSET 5    /* BZPOP et al. */
 #define BLOCKED_POSTPONE 6 /* Blocked by processCommand, re-try processing later. */
 #define BLOCKED_SHUTDOWN 7 /* SHUTDOWN. */
-#define BLOCKED_NUM 8      /* Number of blocked states. */
+#define BLOCKED_ASYNC_TASK 8 /* Async task. */
+#define BLOCKED_NUM 9      /* Number of blocked states. */
 
 /* Client request types */
 #define PROTO_REQ_INLINE 1

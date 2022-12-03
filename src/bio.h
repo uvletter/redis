@@ -44,6 +44,7 @@ void bioCreateLazyFreeJob(lazy_free_fn free_fn, int arg_count, ...);
 #define BIO_CLOSE_FILE    0 /* Deferred close(2) syscall. */
 #define BIO_AOF_FSYNC     1 /* Deferred AOF fsync. */
 #define BIO_LAZY_FREE     2 /* Deferred objects freeing. */
-#define BIO_NUM_OPS       3
+#define BIO_ASYNC_TASK    3 /* Deferred async task. */
+#define BIO_NUM_OPS       4
 
 #endif
