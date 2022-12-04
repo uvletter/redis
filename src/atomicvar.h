@@ -81,6 +81,18 @@
 #define ANNOTATE_HAPPENS_AFTER(v)  ((void) v)
 #endif
 
+#ifndef CACHE_LINE_SIZE
+#if defined(__aarch64__) && defined(__APPLE__)
+#define CACHE_LINE_SIZE 128
+#else
+#define CACHE_LINE_SIZE 64
+#endif
+#endif
+
+typedef struct __attribute__((aligned(CACHE_LINE_SIZE))) threads_pending {
+    redisAtomic unsigned long value;
+} threads_pending;
+
 #if !defined(__ATOMIC_VAR_FORCE_SYNC_MACROS) && defined(__STDC_VERSION__) && \
     (__STDC_VERSION__ >= 201112L) && !defined(__STDC_NO_ATOMICS__)
 /* Use '_Atomic' keyword if the compiler supports. */
@@ -103,6 +115,8 @@
 } while(0)
 #define atomicSetWithSync(var,value) \
     atomic_store_explicit(&var,value,memory_order_seq_cst)
+#define atomicCompareExchangeWeak(var, expected, desired) \
+    atomic_compare_exchange_weak_explicit(&var, expected, desired, memory_order_seq_cst, memory_order_seq_cst)
 #define REDIS_ATOMIC_API "c11-builtin"
 
 #elif !defined(__ATOMIC_VAR_FORCE_SYNC_MACROS) && \
@@ -124,6 +138,8 @@
 } while(0)
 #define atomicSetWithSync(var,value) \
     __atomic_store_n(&var,value,__ATOMIC_SEQ_CST)
+#define atomicCompareExchangeWeak(var, expected, desired) \
+    __atomic_compare_exchange_n(&var, expected, desired, 1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
 #define REDIS_ATOMIC_API "atomic-builtin"
 
 #elif defined(HAVE_ATOMIC)
@@ -149,6 +165,8 @@
     ANNOTATE_HAPPENS_BEFORE(&var);  \
     while(!__sync_bool_compare_and_swap(&var,var,value,__sync_synchronize)); \
 } while(0)
+#define atomicCompareExchangeWeak(var, expected, desired) \
+    __sync_bool_compare_and_swap(&var,expected,desired,__sync_synchronize)
 #define REDIS_ATOMIC_API "sync-builtin"
 
 #else

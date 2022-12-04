@@ -31,6 +31,8 @@
 #define __BIO_H
 
 typedef void lazy_free_fn(void *args[]);
+typedef void async_task_fn(void *privdata);
+typedef void completion_fn(void *privdata, int status);
 
 /* Exported API */
 void bioInit(void);
@@ -39,6 +41,15 @@ void bioKillThreads(void);
 void bioCreateCloseJob(int fd, int need_fsync);
 void bioCreateFsyncJob(int fd);
 void bioCreateLazyFreeJob(lazy_free_fn free_fn, int arg_count, ...);
+void bioCreateAsyncTask(async_task_fn *task_fn, void *privdata);
+
+/* Submit callback to main thread. 
+ *
+ * It's used when background task is completed, byt there're some work 
+ * requiring to be done in main thread */
+void submitCallbackFromBio(completion_fn *completion_cb, void *privdata, int status);
+/* Run callbacks in main thread */
+void runCallbackFromBio();
 
 /* Background job opcodes */
 #define BIO_CLOSE_FILE    0 /* Deferred close(2) syscall. */

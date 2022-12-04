@@ -191,6 +191,8 @@ void unblockClient(client *c) {
         c->postponed_list_node = NULL;
     } else if (c->btype == BLOCKED_SHUTDOWN) {
         /* No special cleanup. */
+    } else if (c->btype == BLOCKED_ASYNC_TASK) {
+        /* No special cleanup. */
     } else {
         serverPanic("Unknown btype in unblockClient().");
     }

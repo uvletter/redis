@@ -31,6 +31,7 @@
 #include "server.h"
 #include "cluster.h"
 #include "connection.h"
+#include "bio.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -1656,7 +1657,10 @@ sds getConfigDebugInfo() {
 }
 
 /* This function replaces the old configuration file with the new content
- * in an atomic manner.
+ * in an atomic manner. 
+ * 
+ * The function will take the ownership of content(the caller should not
+ * refer it any more)
  *
  * The function returns 0 on success, otherwise -1 is returned and errno
  * is set accordingly. */
@@ -1712,11 +1716,35 @@ int rewriteConfigOverwriteFile(char *configfile, sds content) {
     }
 
 cleanup:
+    sdsfree(content);
     old_errno = errno;
     close(fd);
     if (retval) unlink(tmp_conffile);
     errno = old_errno;
     return retval;
+}
+
+/* The callback after rewriteConfig is done.
+ * If success the status is set to 0, otherwise the corresponding errno */
+typedef void rewrite_config_callback(void *privdata, int status);
+
+struct rewriteConfigTaskContext {
+    char *configfile;
+    sds content;
+    rewrite_config_callback *on_completion;
+    void *on_completion_ctx;
+};
+
+void rewriteConfigOverwriteFileTask(void *privdata) {
+    struct rewriteConfigTaskContext *ctx = privdata;
+    if (rewriteConfigOverwriteFile(ctx->configfile, ctx->content) == 0) {
+        submitCallbackFromBio(ctx->on_completion, ctx->on_completion_ctx, 0);
+    } else {
+        submitCallbackFromBio(ctx->on_completion, ctx->on_completion_ctx, errno);
+    }
+    
+    sdsfree(ctx->content);
+    zfree(ctx);
 }
 
 /* Rewrite the configuration file at "path".
@@ -1728,8 +1756,14 @@ cleanup:
  * The force_write flag overrides this behavior and forces everything to be
  * written. This is currently only used for testing purposes.
  *
- * On error -1 is returned and errno is set accordingly, otherwise 0. */
-int rewriteConfig(char *path, int force_write) {
+ * If on_completion is designated, the file operations part will be executed 
+ * asynchronously to avoid potential blocking by slow block devices, after
+ * that on_completion will get executed in main thread.
+ * 
+ * On error -1 is returned and errno is set accordingly, otherwise 0.
+ * In async mode 0 is always returned */
+int rewriteConfig(char *path, int force_write,
+    rewrite_config_callback *on_completion, void *on_completion_privdata) {
     struct rewriteConfigState *state;
     sds newcontent;
     int retval;
@@ -1766,11 +1800,19 @@ int rewriteConfig(char *path, int force_write) {
     /* Step 4: generate a new configuration file from the modified state
      * and write it into the original file. */
     newcontent = rewriteConfigGetContentFromState(state);
-    retval = rewriteConfigOverwriteFile(server.configfile,newcontent);
-
-    sdsfree(newcontent);
     rewriteConfigReleaseState(state);
-    return retval;
+    if (on_completion) {
+        struct rewriteConfigTaskContext *ctx = zmalloc(sizeof(*ctx));
+        ctx->configfile = server.configfile;
+        ctx->content = newcontent;
+        ctx->on_completion = on_completion;
+        ctx->on_completion_ctx = on_completion_privdata;
+        bioCreateAsyncTask(rewriteConfigOverwriteFileTask, ctx);
+    } else {
+        retval = rewriteConfigOverwriteFile(server.configfile,newcontent);
+        sdsfree(newcontent);
+        return retval;
+    }
 }
 
 /*-----------------------------------------------------------------------------
@@ -3317,19 +3359,25 @@ void configResetStatCommand(client *c) {
 /*-----------------------------------------------------------------------------
  * CONFIG REWRITE
  *----------------------------------------------------------------------------*/
+static onRewriteConfigDone(void *ctx, int status) {
+    client *c = ctx;
+    unblockClient(c);
+    if (status) {
+        serverLog(LL_WARNING,"CONFIG REWRITE failed: %s", strerror(status));
+        addReplyErrorFormat(c,"Rewriting config file: %s", strerror(status));
+    } else {
+        serverLog(LL_WARNING,"CONFIG REWRITE executed with success.");
+        addReply(c,shared.ok);
+    }
+}
 
 void configRewriteCommand(client *c) {
     if (server.configfile == NULL) {
         addReplyError(c,"The server is running without a config file");
         return;
     }
-    if (rewriteConfig(server.configfile, 0) == -1) {
-        /* save errno in case of being tainted. */
-        int err = errno;
-        serverLog(LL_WARNING,"CONFIG REWRITE failed: %s", strerror(err));
-        addReplyErrorFormat(c,"Rewriting config file: %s", strerror(err));
-    } else {
-        serverLog(LL_WARNING,"CONFIG REWRITE executed with success.");
-        addReply(c,shared.ok);
-    }
+    /* As the rewrite deals with slow disk, we block the client
+     * and run the rewrite asynchronously */
+    blockClient(c, BLOCKED_ASYNC_TASK);
+    rewriteConfig(server.configfile, 0, onRewriteConfigDone, c); 
 }

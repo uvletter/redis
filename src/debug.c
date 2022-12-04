@@ -942,7 +942,7 @@ NULL
         addReply(c,shared.ok);
     } else if (!strcasecmp(c->argv[1]->ptr,"config-rewrite-force-all") && c->argc == 2)
     {
-        if (rewriteConfig(server.configfile, 1) == -1)
+        if (rewriteConfig(server.configfile, 1, NULL, NULL) == -1)
             addReplyErrorFormat(c, "CONFIG-REWRITE-FORCE-ALL failed: %s", strerror(errno));
         else
             addReply(c, shared.ok);

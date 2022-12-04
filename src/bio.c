@@ -80,6 +80,12 @@ typedef union bio_job {
         lazy_free_fn *free_fn; /* Function that will free the provided arguments */
         void *free_args[]; /* List of arguments to be passed to the free function */
     } free_args;
+
+    struct {
+        async_task_fn *task_fn;
+        void *privdata;
+    } async_task_args;
+    
 } bio_job;
 
 void *bioProcessBackgroundJobs(void *arg);
@@ -159,6 +165,44 @@ void bioCreateFsyncJob(int fd) {
     bioSubmitJob(BIO_AOF_FSYNC, job);
 }
 
+/* Run arbitrary time-consuming operations in the background. 
+ *
+ * Make sure the task_fn is reentrant, i.e. no external status or
+ * variable is refered, otherwise race condition may be involved */
+void bioCreateAsyncTask(async_task_fn *task_fn, void *privdata) {
+    bio_job *job = zmalloc(sizeof(*job));
+    job->async_task_args.task_fn = task_fn;
+    job->async_task_args.privdata = privdata;
+
+    bioSubmitJob(BIO_ASYNC_TASK, job);
+}
+
+struct on_completion_callback {
+    completion_fn *completion_cb;
+    void *privdata;
+    int completion_status
+};
+void submitCallbackFromBio(completion_fn *completion_cb, void *privdata, int status) {
+    struct on_completion_callback *cb = zmalloc(sizeof(*cb));
+    cb->completion_cb = completion_cb;
+    cb->privdata = privdata;
+    cb->completion_status = status;
+
+    while (ringbufferOffer(server.blocked_client_callbacks, cb) == 0) {
+        serverLog(LL_WARNING, "unlikely blocked_client_callbacks is full");
+        usleep(1000);
+    }
+}
+
+void runCallbackFromBio() {
+    void *o;
+    while ((o=ringbufferTake(server.blocked_client_callbacks)) != NULL) {
+        struct on_completion_callback *cb = o;
+        cb->completion_cb(cb->privdata, cb->completion_status);
+        zfree(cb);
+    }
+}
+
 void *bioProcessBackgroundJobs(void *arg) {
     bio_job *job;
     unsigned long type = (unsigned long) arg;
@@ -181,6 +225,9 @@ void *bioProcessBackgroundJobs(void *arg) {
     case BIO_LAZY_FREE:
         redis_set_thread_title("bio_lazy_free");
         break;
+    case BIO_ASYNC_TASK:
+        redis_set_thread_title("bio_async_task");
+        break;    
     }
 
     redisSetCpuAffinity(server.bio_cpulist);
@@ -237,6 +284,8 @@ void *bioProcessBackgroundJobs(void *arg) {
             }
         } else if (type == BIO_LAZY_FREE) {
             job->free_args.free_fn(job->free_args.free_args);
+        } else if (type == BIO_ASYNC_TASK) {
+            job->async_task_args.task_fn(job->async_task_args.privdata);
         } else {
             serverPanic("Wrong job type in bioProcessBackgroundJobs().");
         }
