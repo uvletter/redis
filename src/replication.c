@@ -111,7 +111,7 @@ int bg_unlink(const char *filename) {
             errno = old_errno;
             return -1;
         }
-        bioCreateCloseJob(fd, 0);
+        bioCreateCloseJob(fd, 0, 0);
         return 0; /* Success. */
     }
 }
@@ -1351,11 +1351,12 @@ void removeRDBUsedToSyncReplicas(void) {
     }
 }
 
-void sendBulkDone(client *myself) {
+/* Close the repldbfd and reclaim the page cache if the client hold
+ * the last reference to replication DB */
+void closeRepldbfd(client *myself) {
     listNode *ln;
     listIter li;
     int shouldInvalidateCache = 1;
-    /* If I'm the last one refer the RDB file, invalidate the cache backed by RDB */
     listRewind(server.slaves,&li);
     while((ln = listNext(&li))) {
         client *slave = ln->value;
@@ -1366,14 +1367,11 @@ void sendBulkDone(client *myself) {
     }
 
     if (shouldInvalidateCache) {
-        if (reclaimFilePageCache(myself->repldbfd, 0, 0) == -1) {
-            serverLog(LL_NOTICE,"Unable to reclaim cache after sending RDB: %s", strerror(errno));
-        }
+        bioCreateCloseJob(myself->repldbfd, 0, 1);
+    } else {
+        close(myself->repldbfd);
     }
-
-    close(myself->repldbfd);
     myself->repldbfd = -1;
-
 }
 
 void sendBulkToSlave(connection *conn) {
@@ -1424,7 +1422,7 @@ void sendBulkToSlave(connection *conn) {
     slave->repldboff += nwritten;
     atomicIncr(server.stat_net_repl_output_bytes, nwritten);
     if (slave->repldboff == slave->repldbsize) {
-        sendBulkDone(slave);
+        closeRepldbfd(slave);
         connSetWriteHandler(slave->conn,NULL);
         replicaPutOnline(slave);
         replicaStartCommandStream(slave);
