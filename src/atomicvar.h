@@ -115,8 +115,8 @@ typedef struct __attribute__((aligned(CACHE_LINE_SIZE))) threads_pending {
 } while(0)
 #define atomicSetWithSync(var,value) \
     atomic_store_explicit(&var,value,memory_order_seq_cst)
-#define atomicCompareExchangeWeak(var, expected, desired) \
-    atomic_compare_exchange_weak_explicit(&var, expected, desired, memory_order_seq_cst, memory_order_seq_cst)
+#define atomicCompareExchangeWeak(var,expected,desired) \
+    atomic_compare_exchange_weak_explicit(&var,&expected,desired,memory_order_seq_cst,memory_order_seq_cst)
 #define REDIS_ATOMIC_API "c11-builtin"
 
 #elif !defined(__ATOMIC_VAR_FORCE_SYNC_MACROS) && \
@@ -138,8 +138,8 @@ typedef struct __attribute__((aligned(CACHE_LINE_SIZE))) threads_pending {
 } while(0)
 #define atomicSetWithSync(var,value) \
     __atomic_store_n(&var,value,__ATOMIC_SEQ_CST)
-#define atomicCompareExchangeWeak(var, expected, desired) \
-    __atomic_compare_exchange_n(&var, expected, desired, 1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
+#define atomicCompareExchangeWeak(var,expected,desired) \
+    __atomic_compare_exchange_n(&var,&expected,desired,1,__ATOMIC_SEQ_CST,__ATOMIC_SEQ_CST)
 #define REDIS_ATOMIC_API "atomic-builtin"
 
 #elif defined(HAVE_ATOMIC)
@@ -165,8 +165,8 @@ typedef struct __attribute__((aligned(CACHE_LINE_SIZE))) threads_pending {
     ANNOTATE_HAPPENS_BEFORE(&var);  \
     while(!__sync_bool_compare_and_swap(&var,var,value,__sync_synchronize)); \
 } while(0)
-#define atomicCompareExchangeWeak(var, expected, desired) \
-    __sync_bool_compare_and_swap(&var,expected,desired,__sync_synchronize)
+#define atomicCompareExchangeWeak(var,expected,desired) \
+    __sync_bool_compare_and_swap(&var,&expected,desired,__sync_synchronize)
 #define REDIS_ATOMIC_API "sync-builtin"
 
 #else

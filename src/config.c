@@ -1804,6 +1804,7 @@ int rewriteConfig(char *path, int force_write,
         ctx->on_completion = on_completion;
         ctx->on_completion_ctx = on_completion_privdata;
         bioCreateAsyncTask(rewriteConfigOverwriteFileTask, ctx);
+        return 0;
     } else {
         retval = rewriteConfigOverwriteFile(server.configfile,newcontent);
         sdsfree(newcontent);
