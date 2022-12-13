@@ -1724,10 +1724,6 @@ cleanup:
     return retval;
 }
 
-/* The callback after rewriteConfig is done.
- * If success the status is set to 0, otherwise the corresponding errno */
-typedef void rewrite_config_callback(void *privdata, int status);
-
 struct rewriteConfigTaskContext {
     char *configfile;
     sds content;

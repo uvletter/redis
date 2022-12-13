@@ -3108,6 +3108,10 @@ typedef enum {
     SPECIAL_CONFIG,
 } configType;
 
+/* The callback after async rewriteConfig is done
+ * If success the status is set to 0, otherwise the corresponding errno */
+typedef void rewrite_config_callback(void *privdata, int status);
+
 void loadServerConfig(char *filename, char config_from_stdin, char *options);
 void appendServerSaveParams(time_t seconds, int changes);
 void resetServerSaveParams(void);
