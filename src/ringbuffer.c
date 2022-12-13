@@ -1,6 +1,5 @@
 #include "ringbuffer.h"
 #include "zmalloc.h"
-#include "atomicvar.h"
 
 ringbuffer* ringbufferNew() {
     return (ringbuffer*)zcalloc(sizeof(ringbuffer));

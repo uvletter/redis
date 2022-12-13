@@ -1,7 +1,7 @@
 #ifndef RINGBUFFER_H
 #define RINGBUFFER_H
 
-#include "util.h"
+#include "atomicvar.h"
 
 #define RING_BUFFER_SIZE 16
 #define RING_BUFFER_MASK (RING_BUFFER_SIZE-1)

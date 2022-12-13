@@ -3355,7 +3355,7 @@ void configResetStatCommand(client *c) {
 /*-----------------------------------------------------------------------------
  * CONFIG REWRITE
  *----------------------------------------------------------------------------*/
-static onRewriteConfigDone(void *ctx, int status) {
+static void onRewriteConfigDone(void *ctx, int status) {
     client *c = ctx;
     unblockClient(c);
     if (status) {

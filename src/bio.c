@@ -180,8 +180,9 @@ void bioCreateAsyncTask(async_task_fn *task_fn, void *privdata) {
 struct on_completion_callback {
     completion_fn *completion_cb;
     void *privdata;
-    int completion_status
+    int completion_status;
 };
+
 void submitCallbackFromBio(completion_fn *completion_cb, void *privdata, int status) {
     struct on_completion_callback *cb = zmalloc(sizeof(*cb));
     cb->completion_cb = completion_cb;
