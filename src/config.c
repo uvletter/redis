@@ -1716,7 +1716,6 @@ int rewriteConfigOverwriteFile(char *configfile, sds content) {
     }
 
 cleanup:
-    sdsfree(content);
     old_errno = errno;
     close(fd);
     if (retval) unlink(tmp_conffile);
