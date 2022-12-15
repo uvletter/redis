@@ -2366,8 +2366,10 @@ int rewriteAppendOnlyFile(char *filename) {
 
     rioInitWithFile(&aof,fp);
 
-    if (server.aof_rewrite_incremental_fsync)
+    if (server.aof_rewrite_incremental_fsync) {
         rioSetAutoSync(&aof,REDIS_AUTOSYNC_BYTES);
+        rioEnableReclaimCache(&aof,1);
+    }
 
     startSaving(RDBFLAGS_AOF_PREAMBLE);
 
@@ -2384,6 +2386,7 @@ int rewriteAppendOnlyFile(char *filename) {
     /* Make sure data will not remain on the OS's output buffers */
     if (fflush(fp)) goto werr;
     if (fsync(fileno(fp))) goto werr;
+    if (reclaimFilePageCache(fileno(fp), 0, 0) == -1) goto werr;
     if (fclose(fp)) { fp = NULL; goto werr; }
     fp = NULL;
 
