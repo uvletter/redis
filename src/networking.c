@@ -82,6 +82,9 @@ void *dupClientReplyValue(void *o) {
 }
 
 void freeClientReplyValue(void *o) {
+    if (((clientReplyHeader*)o)->type == clientReplyRobjType) {
+        decrRefCount(((clientReplyRobj*)o)->obj);
+    }
     zfree(o);
 }
 
@@ -342,7 +345,8 @@ size_t _addReplyToBuffer(client *c, const char *s, size_t len) {
  * Note: some edits to this function need to be relayed to AddReplyFromClient. */
 void _addReplyProtoToList(client *c, const char *s, size_t len) {
     listNode *ln = listLast(c->reply);
-    clientReplyBlock *tail = ln? listNodeValue(ln): NULL;
+    clientReplyHeader *h = ln? listNodeValue(ln): NULL;
+    clientReplyBlock *tail = h->type == clientReplyBlockType? (clientReplyBlock*)h: NULL;
 
     /* Note that 'tail' may be NULL even if we have a tail node, because when
      * addReplyDeferredLen() is used, it sets a dummy node to NULL just
@@ -393,6 +397,26 @@ void _addReplyToBufferOrList(client *c, const char *s, size_t len) {
     size_t reply_len = _addReplyToBuffer(c,s,len);
     if (len > reply_len) _addReplyProtoToList(c,s+reply_len,len-reply_len);
 }
+void _addReplyToObjOrBuffer(client *c, robj *obj) {
+    if (c->flags & CLIENT_CLOSE_AFTER_REPLY) return;
+
+    /* Replicas should normally not cause any writes to the reply buffer. In case a rogue replica sent a command on the
+     * replication link that caused a reply to be generated we'll simply disconnect it.
+     * Note this is the simplest way to check a command added a response. Replication links are used to write data but
+     * not for responses, so we should normally never get here on a replica client. */
+    if (getClientType(c) == CLIENT_TYPE_SLAVE) {
+        sds cmdname = c->lastcmd ? c->lastcmd->fullname : NULL;
+        logInvalidUseAndFreeClientAsync(c, "Replica generated a reply to command '%s'",
+                                        cmdname ? cmdname : "<unknown>");
+        return;
+    }
+    clientReplyRobj *o = zmalloc(sizeof(clientReplyRobj));
+    o->header.type = clientReplyRobjType;
+    o->obj = obj;
+    incrRefCount(obj);
+    listAddNodeTail(c->reply, o);
+    c->reply_bytes += sdslen(obj->ptr);
+}
 
 /* -----------------------------------------------------------------------------
  * Higher level functions to queue data on the client output buffer.
@@ -404,7 +428,10 @@ void addReply(client *c, robj *obj) {
     if (prepareClientToWrite(c) != C_OK) return;
 
     if (sdsEncodedObject(obj)) {
-        _addReplyToBufferOrList(c,obj->ptr,sdslen(obj->ptr));
+        if (sdslen(obj->ptr) >= PROTO_REPLY_CHUNK_BYTES/2)
+            _addReplyToObjOrBuffer(c, obj);
+        else
+            _addReplyToBufferOrList(c,obj->ptr,sdslen(obj->ptr));
     } else if (obj->encoding == OBJ_ENCODING_INT) {
         /* For integer encoded strings we just convert it into a string
          * using our optimized function, and attach the resulting string
@@ -1757,21 +1784,32 @@ static int _writevToClient(client *c, ssize_t *nwritten) {
     size_t offset = c->bufpos > 0 ? 0 : c->sentlen;
     listIter iter;
     listNode *next;
-    clientReplyBlock *o;
+    clientReplyHeader *h;
     listRewind(c->reply, &iter);
     while ((next = listNext(&iter)) && iovcnt < IOV_MAX && iov_bytes_len < NET_MAX_WRITES_PER_EVENT) {
-        o = listNodeValue(next);
-        if (o->used == 0) { /* empty node, just release it and skip. */
-            c->reply_bytes -= o->size;
-            listDelNode(c->reply, next);
-            offset = 0;
-            continue;
-        }
+        h = listNodeValue(next);
+        if (h->type == clientReplyBlockType) {
+            clientReplyBlock *o = (clientReplyBlock*)h;
+            
+            if (o->used == 0) { /* empty node, just release it and skip. */
+                c->reply_bytes -= o->size;
+                listDelNode(c->reply, next);
+                offset = 0;
+                continue;
+            }
 
-        iov[iovcnt].iov_base = o->buf + offset;
-        iov[iovcnt].iov_len = o->used - offset;
-        iov_bytes_len += iov[iovcnt++].iov_len;
-        offset = 0;
+            iov[iovcnt].iov_base = o->buf + offset;
+            iov[iovcnt].iov_len = o->used - offset;
+            iov_bytes_len += iov[iovcnt++].iov_len;
+            offset = 0;
+        } else if  (h->type == clientReplyRobjType) {
+            clientReplyRobj *o = (clientReplyRobj*)h;
+            iov[iovcnt].iov_base = (char*)o->obj->ptr + offset;
+            iov[iovcnt].iov_len = sdslen(o->obj->ptr) - offset;
+            iov_bytes_len += iov[iovcnt++].iov_len;
+            offset = 0;
+
+        }
     }
     if (iovcnt == 0) return C_OK;
     *nwritten = connWritev(c->conn, iov, iovcnt);
@@ -1794,13 +1832,15 @@ static int _writevToClient(client *c, ssize_t *nwritten) {
     listRewind(c->reply, &iter);
     while (remaining > 0) {
         next = listNext(&iter);
-        o = listNodeValue(next);
-        if (remaining < (ssize_t)(o->used - c->sentlen)) {
+        h = listNodeValue(next);
+        size_t len = (h->type ==clientReplyBlockType)? ((clientReplyBlock*)h)->used: sdslen(((clientReplyRobj*)h)->obj->ptr);
+        size_t size = (h->type==clientReplyBlockType)? ((clientReplyBlock*)h)->size: len;
+        if (remaining < (ssize_t)(len - c->sentlen)) {
             c->sentlen += remaining;
             break;
         }
-        remaining -= (ssize_t)(o->used - c->sentlen);
-        c->reply_bytes -= o->size;
+        remaining -= (ssize_t)(len - c->sentlen);
+        c->reply_bytes -= size;
         listDelNode(c->reply, next);
         c->sentlen = 0;
     }

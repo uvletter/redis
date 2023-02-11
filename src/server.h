@@ -903,12 +903,22 @@ char *getObjectTypeName(robj*);
 
 struct evictionPoolEntry; /* Defined in evict.c */
 
+#define clientReplyBlockType 0
+#define clientReplyRobjType 1
+typedef struct clientReplyHeader {
+    int type;
+} clientReplyHeader;
 /* This structure is used in order to represent the output buffer of a client,
  * which is actually a linked list of blocks like that, that is: client->reply. */
 typedef struct clientReplyBlock {
+    clientReplyHeader header;
     size_t size, used;
     char buf[];
 } clientReplyBlock;
+typedef struct clientReplyRobj {
+    clientReplyHeader header;
+    robj *obj;
+} clientReplyRobj;
 
 /* Replication buffer blocks is the list of replBufBlock.
  *
