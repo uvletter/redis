@@ -229,19 +229,13 @@ static long long ustime(void) {
     long long ust;
 
     gettimeofday(&tv, NULL);
-    ust = ((long)tv.tv_sec)*1000000;
+    ust = ((long long)tv.tv_sec)*1000000;
     ust += tv.tv_usec;
     return ust;
 }
 
 static long long mstime(void) {
-    struct timeval tv;
-    long long mst;
-
-    gettimeofday(&tv, NULL);
-    mst = ((long long)tv.tv_sec)*1000;
-    mst += tv.tv_usec/1000;
-    return mst;
+    return ustime()/1000;
 }
 
 static uint64_t dictSdsHash(const void *key) {
@@ -326,10 +320,11 @@ static redisConfig *getRedisConfig(const char *ip, int port,
     c = getRedisContext(ip, port, hostsocket);
     if (c == NULL) {
         freeRedisConfig(cfg);
-        return NULL;
+        exit(1);
     }
     redisAppendCommand(c, "CONFIG GET %s", "save");
     redisAppendCommand(c, "CONFIG GET %s", "appendonly");
+    int abort_test = 0;
     int i = 0;
     void *r = NULL;
     for (; i < 2; i++) {
@@ -338,7 +333,6 @@ static redisConfig *getRedisConfig(const char *ip, int port,
         reply = res == REDIS_OK ? ((redisReply *) r) : NULL;
         if (res != REDIS_OK || !r) goto fail;
         if (reply->type == REDIS_REPLY_ERROR) {
-            fprintf(stderr, "ERROR: %s\n", reply->str);
             goto fail;
         }
         if (reply->type != REDIS_REPLY_ARRAY || reply->elements < 2) goto fail;
@@ -354,15 +348,14 @@ static redisConfig *getRedisConfig(const char *ip, int port,
     redisFree(c);
     return cfg;
 fail:
-    fprintf(stderr, "ERROR: failed to fetch CONFIG from ");
-    if (hostsocket == NULL) fprintf(stderr, "%s:%d\n", ip, port);
-    else fprintf(stderr, "%s\n", hostsocket);
-    int abort_test = 0;
     if (reply && reply->type == REDIS_REPLY_ERROR &&
-        (!strncmp(reply->str,"NOAUTH",6) ||
-         !strncmp(reply->str,"WRONGPASS",9) ||
-         !strncmp(reply->str,"NOPERM",6)))
+        !strncmp(reply->str,"NOAUTH",6)) {
+        if (hostsocket == NULL)
+            fprintf(stderr, "Node %s:%d replied with error:\n%s\n", ip, port, reply->str);
+        else
+            fprintf(stderr, "Node %s replied with error:\n%s\n", hostsocket, reply->str);
         abort_test = 1;
+    }
     freeReplyObject(reply);
     redisFree(c);
     freeRedisConfig(cfg);
@@ -1446,6 +1439,10 @@ int parseOptions(int argc, char **argv) {
         } else if (!strcmp(argv[i],"-p")) {
             if (lastarg) goto invalid;
             config.conn_info.hostport = atoi(argv[++i]);
+            if (config.conn_info.hostport < 0 || config.conn_info.hostport > 65535) {
+                fprintf(stderr, "Invalid server port.\n");
+                exit(1);
+            }
         } else if (!strcmp(argv[i],"-s")) {
             if (lastarg) goto invalid;
             config.hostsocket = strdup(argv[++i]);
@@ -1459,6 +1456,10 @@ int parseOptions(int argc, char **argv) {
             config.conn_info.user = sdsnew(argv[++i]);
         } else if (!strcmp(argv[i],"-u") && !lastarg) {
             parseRedisUri(argv[++i],"redis-benchmark",&config.conn_info,&config.tls);
+            if (config.conn_info.hostport < 0 || config.conn_info.hostport > 65535) {
+                fprintf(stderr, "Invalid server port.\n");
+                exit(1);
+            }
             config.input_dbnumstr = sdsfromlonglong(config.conn_info.input_dbnum);
         } else if (!strcmp(argv[i],"-3")) {
             config.resp3 = 1;
