@@ -303,11 +303,12 @@ jobs:
         make REDIS_CFLAGS='-Werror'
     - name: testprep
       run: |
-        sudo apt-get install vmtouch
+        sudo apt-get install vmtouch iotop
         mkdir /tmp/master 
         mkdir /tmp/slave
     - name: warm up
       run: |
+        sudo iotop -o -b
         ./src/redis-server --daemonize yes --logfile /dev/null
         ./src/redis-benchmark -n 1 > /dev/null
         ./src/redis-cli save | grep OK > /dev/null
