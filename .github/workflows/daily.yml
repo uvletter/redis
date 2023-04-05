@@ -284,9 +284,6 @@ jobs:
 
   test-ubuntu-reclaim-cache:
     runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'workflow_dispatch' || (github.event_name != 'workflow_dispatch' && github.repository == 'redis/redis')) &&
-      !contains(github.event.inputs.skipjobs, 'specific')
     timeout-minutes: 14400
     steps:
     - name: prep
