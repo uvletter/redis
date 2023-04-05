@@ -305,7 +305,13 @@ jobs:
         mkdir /tmp/slave
     - name: warm up
       run: |
-        sudo iotop -o -b
+        echo "for i in {1..100}" >> monitor.sh
+        echo "do" >> monitor.sh
+        echo "sudo iotop -o -n1" >> monitor.sh
+        echo "grep -w file /sys/fs/cgroup/memory.stat | awk '{print $2}'" >> monitor.sh
+        echo "sleep 1" >> monitor.sh
+        echo "done" >> monitor.sh
+        sh monitor.sh
         ./src/redis-server --daemonize yes --logfile /dev/null
         ./src/redis-benchmark -n 1 > /dev/null
         ./src/redis-cli save | grep OK > /dev/null
