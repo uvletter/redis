@@ -274,6 +274,9 @@ void *bioProcessBackgroundJobs(void *arg) {
             } else {
                 atomicSet(server.aof_bio_fsync_status,C_OK);
                 atomicSet(server.fsynced_reploff_pending, job->fd_args.offset);
+ if (write(server.module_pipe[1],"A",1) != 1) {
+                        /* Ignore the error, this is best-effort. */
+                    }
             }
 
             if (job->fd_args.need_reclaim_cache) {
