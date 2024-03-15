@@ -1196,29 +1196,21 @@ void flushAppendOnlyFile(int force) {
         }
 
         /* Handle the AOF write error. */
-        if (server.aof_fsync == AOF_FSYNC_ALWAYS) {
-            /* We can't recover when the fsync policy is ALWAYS since the reply
-             * for the client is already in the output buffers (both writes and
-             * reads), and the changes to the db can't be rolled back. Since we
-             * have a contract with the user that on acknowledged or observed
-             * writes are is synced on disk, we must exit. */
-            serverLog(LL_WARNING,"Can't recover from AOF write error when the AOF fsync policy is 'always'. Exiting...");
-            exit(1);
-        } else {
-            /* Recover from failed write leaving data into the buffer. However
-             * set an error to stop accepting writes as long as the error
-             * condition is not cleared. */
-            server.aof_last_write_status = C_ERR;
+    
+        /* Recover from failed write leaving data into the buffer. However
+            * set an error to stop accepting writes as long as the error
+            * condition is not cleared. */
+        server.aof_last_write_status = C_ERR;
 
-            /* Trim the sds buffer if there was a partial write, and there
-             * was no way to undo it with ftruncate(2). */
-            if (nwritten > 0) {
-                server.aof_current_size += nwritten;
-                server.aof_last_incr_size += nwritten;
-                sdsrange(server.aof_buf,nwritten,-1);
-            }
-            return; /* We'll try again on the next call... */
+        /* Trim the sds buffer if there was a partial write, and there
+            * was no way to undo it with ftruncate(2). */
+        if (nwritten > 0) {
+            server.aof_current_size += nwritten;
+            server.aof_last_incr_size += nwritten;
+            sdsrange(server.aof_buf,nwritten,-1);
         }
+        return; /* We'll try again on the next call... */
+        
     } else {
         /* Successful write(2). If AOF was in error state, restore the
          * OK state and log the event. */
@@ -1247,25 +1239,8 @@ try_fsync:
         return;
 
     /* Perform the fsync if needed. */
-    if (server.aof_fsync == AOF_FSYNC_ALWAYS) {
-        /* redis_fsync is defined as fdatasync() for Linux in order to avoid
-         * flushing metadata. */
-        latencyStartMonitor(latency);
-        /* Let's try to get this data on the disk. To guarantee data safe when
-         * the AOF fsync policy is 'always', we should exit if failed to fsync
-         * AOF (see comment next to the exit(1) after write error above). */
-        if (redis_fsync(server.aof_fd) == -1) {
-            serverLog(LL_WARNING,"Can't persist AOF for fsync error when the "
-              "AOF fsync policy is 'always': %s. Exiting...", strerror(errno));
-            exit(1);
-        }
-        latencyEndMonitor(latency);
-        latencyAddSampleIfNeeded("aof-fsync-always",latency);
-        server.aof_last_incr_fsync_offset = server.aof_last_incr_size;
-        server.aof_last_fsync = server.mstime;
-        atomicSet(server.fsynced_reploff_pending, server.master_repl_offset);
-    } else if (server.aof_fsync == AOF_FSYNC_EVERYSEC &&
-               server.mstime - server.aof_last_fsync >= 1000) {
+    if (server.aof_fsync == AOF_FSYNC_ALWAYS || (server.aof_fsync == AOF_FSYNC_EVERYSEC &&
+               server.mstime - server.aof_last_fsync >= 1000)) {
         if (!sync_in_progress) {
             aof_background_fsync(server.aof_fd);
             server.aof_last_incr_fsync_offset = server.aof_last_incr_size;

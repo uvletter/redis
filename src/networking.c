@@ -2051,6 +2051,9 @@ int handleClientsWithPendingWrites(void) {
     listRewind(server.clients_pending_write,&li);
     while((ln = listNext(&li))) {
         client *c = listNodeValue(ln);
+        if (server.aof_fsync == AOF_FSYNC_ALWAYS && c->woff > server.fsynced_reploff) {
+            break;
+        }
         c->flags &= ~CLIENT_PENDING_WRITE;
         listUnlinkNode(server.clients_pending_write,ln);
 
